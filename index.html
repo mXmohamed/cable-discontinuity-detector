@@ -29,10 +29,6 @@
         .file-upload-wrapper.is-active {
             border-color: #28a745;
         }
-        .progress {
-            display: none;
-            margin-top: 15px;
-        }
         .table-container {
             margin-top: 30px;
             background-color: white;
@@ -73,11 +69,8 @@
         #exportBtn {
             margin-left: 10px;
         }
-        #loadingSpinner {
-            display: none;
-        }
-        #statusMessage {
-            margin-top: 10px;
+        #statusText {
+            margin-top: 15px;
             font-weight: bold;
         }
     </style>
@@ -100,13 +93,7 @@
             <p>Glissez-déposez votre fichier ici ou cliquez pour sélectionner</p>
             <input type="file" id="fileInput" accept=".csv" class="d-none">
             <button class="btn btn-primary" id="browseBtn">Parcourir...</button>
-            <div class="progress mt-3">
-                <div class="progress-bar" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-            </div>
-            <div id="loadingSpinner" class="spinner-border text-primary mt-3" role="status">
-                <span class="visually-hidden">Chargement...</span>
-            </div>
-            <div id="statusMessage" class="text-center"></div>
+            <div id="statusText"></div>
         </div>
 
         <div id="resultSection" class="hidden">
@@ -158,7 +145,6 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const dropArea = document.getElementById('drop-area');
@@ -170,10 +156,7 @@
             const searchInput = document.getElementById('searchInput');
             const typeFilter = document.getElementById('typeFilter');
             const exportBtn = document.getElementById('exportBtn');
-            const progressBar = document.querySelector('.progress-bar');
-            const progress = document.querySelector('.progress');
-            const loadingSpinner = document.getElementById('loadingSpinner');
-            const statusMessage = document.getElementById('statusMessage');
+            const statusText = document.getElementById('statusText');
 
             let allResults = [];
             let filteredResults = [];
@@ -237,196 +220,168 @@
                     return;
                 }
 
+                isProcessing = true;
+                statusText.textContent = "Lecture du fichier...";
+                browseBtn.disabled = true;
+
                 // Réinitialiser les résultats précédents
                 allResults = [];
                 filteredResults = [];
                 resultSection.classList.add('hidden');
                 
-                // Afficher le spinner et la barre de progression
-                loadingSpinner.style.display = 'inline-block';
-                progress.style.display = 'block';
-                progressBar.style.width = '0%';
-                progressBar.setAttribute('aria-valuenow', 0);
-                statusMessage.textContent = 'Préparation de l\'analyse...';
+                // Méthode manuelle de lecture et traitement du fichier
+                const reader = new FileReader();
                 
-                // Marquer comme en cours de traitement
-                isProcessing = true;
+                reader.onloadstart = function() {
+                    statusText.textContent = "Début de la lecture du fichier...";
+                };
                 
-                // Traitement par lots
-                const totalRows = [];
-                let processedRows = 0;
-                let totalSize = file.size;
+                reader.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percentLoaded = Math.round((e.loaded / e.total) * 100);
+                        statusText.textContent = `Lecture du fichier: ${percentLoaded}%`;
+                    }
+                };
                 
-                // Configurer PapaParse pour le traitement par lots
-                Papa.parse(file, {
-                    header: true,
-                    skipEmptyLines: true,
-                    delimiter: ';',  // Point-virgule fixe comme séparateur
-                    encoding: "UTF-8", // UTF-8 fixe comme encodage
-                    chunk: function(results, parser) {
-                        try {
-                            // Mettre à jour la barre de progression
-                            const bytesProcessed = parser.streamer._input.streamer._input.file.loaded || 0;
-                            const progress = Math.round((bytesProcessed / totalSize) * 70); // Max 70% pendant le parsing
-                            progressBar.style.width = progress + '%';
-                            progressBar.setAttribute('aria-valuenow', progress);
+                reader.onload = function(e) {
+                    statusText.textContent = "Fichier chargé, début de l'analyse...";
+                    const csvContent = e.target.result;
+                    
+                    // Traitement simple ligne par ligne
+                    setTimeout(() => {
+                        processCSVContent(csvContent);
+                    }, 100);
+                };
+                
+                reader.onerror = function() {
+                    statusText.textContent = "Erreur lors de la lecture du fichier.";
+                    isProcessing = false;
+                    browseBtn.disabled = false;
+                };
+                
+                reader.readAsText(file);
+            }
+            
+            function processCSVContent(content) {
+                try {
+                    // Convertir le contenu en tableau de lignes
+                    const lines = content.split(/\r\n|\n/);
+                    if (lines.length < 2) {
+                        throw new Error("Le fichier CSV ne contient pas assez de lignes.");
+                    }
+                    
+                    // Extraction des en-têtes (première ligne)
+                    const headers = lines[0].split(';');
+                    
+                    // Trouver les indices des colonnes importantes
+                    const columnIndices = {
+                        cb_code: headers.indexOf('cb_code'),
+                        cb_etiquet: headers.indexOf('cb_etiquet'),
+                        cb_nd1: headers.indexOf('cb_nd1'),
+                        cb_nd2: headers.indexOf('cb_nd2'),
+                        cb_bp1: headers.indexOf('cb_bp1'),
+                        cb_ba1: headers.indexOf('cb_ba1'),
+                        cb_bp2: headers.indexOf('cb_bp2'),
+                        cb_ba2: headers.indexOf('cb_ba2')
+                    };
+                    
+                    // Vérifier que les colonnes essentielles sont présentes
+                    if (columnIndices.cb_bp1 === -1 || columnIndices.cb_ba1 === -1 || 
+                        columnIndices.cb_bp2 === -1 || columnIndices.cb_ba2 === -1) {
+                        throw new Error("Colonnes essentielles manquantes dans le CSV.");
+                    }
+                    
+                    // Indices de secours pour les colonnes optionnelles
+                    if (columnIndices.cb_code === -1) columnIndices.cb_code = 0;
+                    if (columnIndices.cb_etiquet === -1) columnIndices.cb_etiquet = 1;
+                    if (columnIndices.cb_nd1 === -1) columnIndices.cb_nd1 = 2;
+                    if (columnIndices.cb_nd2 === -1) columnIndices.cb_nd2 = 3;
+                    
+                    // Traitement des lignes par petits lots
+                    statusText.textContent = "Analyse des lignes en cours...";
+                    
+                    const processInBatches = function(startIndex, batchSize) {
+                        let count = 0;
+                        let endIndex = Math.min(startIndex + batchSize, lines.length);
+                        
+                        for (let i = startIndex; i < endIndex; i++) {
+                            if (lines[i].trim() === '') continue;
                             
-                            // Traiter les données de ce lot
-                            processedRows += results.data.length;
-                            statusMessage.textContent = `Analyse en cours... ${processedRows} lignes traitées`;
+                            const fields = lines[i].split(';');
                             
-                            // Traiter les données et stocker les résultats
-                            const chunkResults = processResults(results.data);
-                            totalRows.push(...chunkResults);
+                            // Vérifier si les extrémités sont connectées
+                            const hasBP1 = columnIndices.cb_bp1 < fields.length && fields[columnIndices.cb_bp1].trim() !== '';
+                            const hasBA1 = columnIndices.cb_ba1 < fields.length && fields[columnIndices.cb_ba1].trim() !== '';
+                            const hasBP2 = columnIndices.cb_bp2 < fields.length && fields[columnIndices.cb_bp2].trim() !== '';
+                            const hasBA2 = columnIndices.cb_ba2 < fields.length && fields[columnIndices.cb_ba2].trim() !== '';
                             
-                            // Pause pour permettre au navigateur de respirer
+                            const isExtremity1Connected = hasBP1 || hasBA1;
+                            const isExtremity2Connected = hasBP2 || hasBA2;
+                            
+                            // Si une discontinuité est détectée
+                            if (!isExtremity1Connected || !isExtremity2Connected) {
+                                let discontinuityType = '';
+                                
+                                if (!isExtremity1Connected && !isExtremity2Connected) {
+                                    discontinuityType = 'Double discontinuité';
+                                } else if (!isExtremity1Connected) {
+                                    discontinuityType = 'Discontinuité extrémité 1';
+                                } else if (!isExtremity2Connected) {
+                                    discontinuityType = 'Discontinuité extrémité 2';
+                                }
+                                
+                                // Ajouter aux résultats
+                                allResults.push({
+                                    cb_code: columnIndices.cb_code < fields.length ? fields[columnIndices.cb_code] : '',
+                                    cb_etiquet: columnIndices.cb_etiquet < fields.length ? fields[columnIndices.cb_etiquet] : '',
+                                    cb_nd1: columnIndices.cb_nd1 < fields.length ? fields[columnIndices.cb_nd1] : '',
+                                    cb_nd2: columnIndices.cb_nd2 < fields.length ? fields[columnIndices.cb_nd2] : '',
+                                    cb_bp1: columnIndices.cb_bp1 < fields.length ? fields[columnIndices.cb_bp1] : '',
+                                    cb_ba1: columnIndices.cb_ba1 < fields.length ? fields[columnIndices.cb_ba1] : '',
+                                    cb_bp2: columnIndices.cb_bp2 < fields.length ? fields[columnIndices.cb_bp2] : '',
+                                    cb_ba2: columnIndices.cb_ba2 < fields.length ? fields[columnIndices.cb_ba2] : '',
+                                    Type_Discontinuite: discontinuityType,
+                                    isExtremity1Connected: isExtremity1Connected,
+                                    isExtremity2Connected: isExtremity2Connected
+                                });
+                            }
+                            
+                            count++;
+                        }
+                        
+                        // Mettre à jour le statut
+                        statusText.textContent = `Analyse en cours... ${endIndex-1} lignes sur ${lines.length-1} traitées`;
+                        
+                        // S'il reste des lignes à traiter, programmer le prochain lot
+                        if (endIndex < lines.length) {
                             setTimeout(function() {
-                                parser.resume();
+                                processInBatches(endIndex, batchSize);
                             }, 0);
-                        } catch (e) {
-                            console.error("Erreur lors du traitement du lot:", e);
-                            statusMessage.textContent = "Erreur pendant le traitement: " + e.message;
-                            parser.abort();
-                            isProcessing = false;
+                        } else {
+                            // Analyse terminée
+                            finishProcessing();
                         }
-                    },
-                    complete: function() {
-                        try {
-                            // Mise à jour finale de la progression
-                            progressBar.style.width = '90%';
-                            progressBar.setAttribute('aria-valuenow', 90);
-                            statusMessage.textContent = 'Finalisation du traitement...';
-                            
-                            // Afficher les résultats
-                            setTimeout(function() {
-                                allResults = totalRows;
-                                filteredResults = [...allResults];
-                                
-                                // Finaliser l'affichage
-                                progressBar.style.width = '100%';
-                                progressBar.setAttribute('aria-valuenow', 100);
-                                displayResults();
-                                resultSection.classList.remove('hidden');
-                                
-                                // Nettoyer l'UI
-                                loadingSpinner.style.display = 'none';
-                                progress.style.display = 'none';
-                                statusMessage.textContent = `Analyse terminée: ${processedRows} lignes traitées, ${allResults.length} discontinuités trouvées.`;
-                                isProcessing = false;
-                            }, 200);
-                        } catch (e) {
-                            console.error("Erreur lors de la finalisation:", e);
-                            statusMessage.textContent = "Erreur lors de la finalisation: " + e.message;
-                            isProcessing = false;
-                            loadingSpinner.style.display = 'none';
-                            progress.style.display = 'none';
-                        }
-                    },
-                    error: function(error) {
-                        console.error('Error parsing CSV:', error);
-                        alert('Erreur lors de l\'analyse du fichier CSV: ' + error.message);
-                        
-                        // Cacher le spinner et la barre de progression
-                        loadingSpinner.style.display = 'none';
-                        progress.style.display = 'none';
-                        statusMessage.textContent = 'Erreur: ' + error.message;
-                        isProcessing = false;
-                    }
-                });
+                    };
+                    
+                    // Commencer le traitement par lots, en sautant la ligne d'en-tête
+                    processInBatches(1, 1000);
+                } catch (error) {
+                    statusText.textContent = "Erreur lors de l'analyse: " + error.message;
+                    console.error("Erreur d'analyse:", error);
+                    isProcessing = false;
+                    browseBtn.disabled = false;
+                }
             }
-
-            function processResults(data) {
-                const results = [];
+            
+            function finishProcessing() {
+                // Traitement terminé
+                filteredResults = [...allResults];
+                displayResults();
+                resultSection.classList.remove('hidden');
                 
-                // Analyse des données pour trouver les discontinuités
-                data.forEach(row => {
-                    try {
-                        // Vérifier si les colonnes nécessaires existent
-                        const hasRequiredColumns = checkRequiredColumns(row);
-                        if (!hasRequiredColumns) return;
-                        
-                        // Vérifier si les extrémités sont connectées
-                        const isExtremity1Connected = 
-                            (row.cb_bp1 && row.cb_bp1.trim().length > 0) || 
-                            (row.cb_ba1 && row.cb_ba1.trim().length > 0);
-                        
-                        const isExtremity2Connected = 
-                            (row.cb_bp2 && row.cb_bp2.trim().length > 0) || 
-                            (row.cb_ba2 && row.cb_ba2.trim().length > 0);
-                        
-                        // Si au moins une extrémité n'est pas connectée, c'est une discontinuité
-                        if (!isExtremity1Connected || !isExtremity2Connected) {
-                            let discontinuityType = '';
-                            
-                            if (!isExtremity1Connected && !isExtremity2Connected) {
-                                discontinuityType = 'Double discontinuité';
-                            } else if (!isExtremity1Connected) {
-                                discontinuityType = 'Discontinuité extrémité 1';
-                            } else if (!isExtremity2Connected) {
-                                discontinuityType = 'Discontinuité extrémité 2';
-                            }
-                            
-                            // Ajouter les informations de discontinuité
-                            row.Type_Discontinuite = discontinuityType;
-                            row.isExtremity1Connected = isExtremity1Connected;
-                            row.isExtremity2Connected = isExtremity2Connected;
-                            
-                            results.push(row);
-                        }
-                    } catch (e) {
-                        console.error("Erreur lors du traitement d'une ligne:", e, row);
-                    }
-                });
-                
-                return results;
-            }
-
-            function checkRequiredColumns(row) {
-                const requiredColumns = ['cb_bp1', 'cb_ba1', 'cb_bp2', 'cb_ba2'];
-                
-                // Vérifier si les colonnes existent, sinon essayer de les trouver avec des noms similaires
-                for (const column of requiredColumns) {
-                    if (!(column in row)) {
-                        // Essayer de trouver des colonnes avec des noms similaires
-                        let found = false;
-                        for (const key in row) {
-                            if (key.toLowerCase() === column.toLowerCase() || 
-                                key.toLowerCase().includes(column.toLowerCase())) {
-                                row[column] = row[key];
-                                found = true;
-                                break;
-                            }
-                        }
-                        
-                        if (!found) {
-                            // Si on ne trouve toujours pas, créer une colonne vide
-                            row[column] = '';
-                        }
-                    }
-                }
-                
-                // Vérifier aussi cb_code et cb_etiquet
-                if (!('cb_code' in row)) {
-                    // Utiliser la première colonne comme cb_code si elle n'existe pas
-                    const firstKey = Object.keys(row)[0];
-                    row.cb_code = row[firstKey] || '';
-                }
-                
-                if (!('cb_etiquet' in row)) {
-                    // Utiliser la deuxième colonne comme cb_etiquet si elle n'existe pas
-                    const keys = Object.keys(row);
-                    if (keys.length > 1) {
-                        row.cb_etiquet = row[keys[1]] || '';
-                    } else {
-                        row.cb_etiquet = '';
-                    }
-                }
-                
-                // Vérifier aussi cb_nd1 et cb_nd2
-                if (!('cb_nd1' in row)) row.cb_nd1 = '';
-                if (!('cb_nd2' in row)) row.cb_nd2 = '';
-                
-                return true;
+                statusText.textContent = `Analyse terminée: ${allResults.length} discontinuités trouvées.`;
+                isProcessing = false;
+                browseBtn.disabled = false;
             }
 
             function displayResults() {
