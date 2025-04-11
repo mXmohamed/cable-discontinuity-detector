@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détecteur de Discontinuités de Câbles</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .header {
+            margin-bottom: 30px;
+        }
+        .file-upload-wrapper {
+            position: relative;
+            margin-bottom: 20px;
+            padding: 20px;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            text-align: center;
+            transition: all 0.3s;
+            background-color: white;
+        }
+        .file-upload-wrapper:hover {
+            border-color: #0d6efd;
+        }
+        .file-upload-wrapper.is-active {
+            border-color: #28a745;
+        }
+        .progress {
+            display: none;
+            margin-top: 15px;
+        }
+        .table-container {
+            margin-top: 30px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            padding: 15px;
+            overflow-x: auto;
+        }
+        .result-summary {
+            margin-top: 20px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .discontinuity-cell {
+            background-color: #ffcccc !important;
+        }
+        .filter-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .filter-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .info-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #e9f7fe;
+            border-radius: 8px;
+            border-left: 4px solid #0dcaf0;
+        }
+        .hidden {
+            display: none;
+        }
+        #exportBtn {
+            margin-left: 10px;
+        }
+        #loadingSpinner {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="text-center">Détecteur de Discontinuités de Câbles</h1>
+            <p class="text-center text-muted">Analysez votre fichier CSV pour détecter les discontinuités dans les câbles optiques</p>
+        </div>
+
+        <div class="info-section">
+            <h5>Comment fonctionne cet outil?</h5>
+            <p>Une discontinuité est détectée lorsque les deux champs (cb_bp ET cb_ba) sont vides à une même extrémité. Si au moins l'un des deux est rempli, l'extrémité est considérée comme connectée.</p>
+            <p>Les extrémités problématiques seront surlignées en rouge dans le tableau des résultats.</p>
+        </div>
+
+        <div class="file-upload-wrapper" id="drop-area">
+            <h5>Importez votre fichier CSV</h5>
+            <p>Glissez-déposez votre fichier ici ou cliquez pour sélectionner</p>
+            <input type="file" id="fileInput" accept=".csv" class="d-none">
+            <button class="btn btn-primary" id="browseBtn">Parcourir...</button>
+            <div class="progress mt-3">
+                <div class="progress-bar" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+            <div id="loadingSpinner" class="spinner-border text-primary mt-3" role="status">
+                <span class="visually-hidden">Chargement...</span>
+            </div>
+        </div>
+
+        <div id="resultSection" class="hidden">
+            <div class="filter-section">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5 class="filter-title">Filtrer les résultats</h5>
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">Rechercher</span>
+                            <input type="text" id="searchInput" class="form-control" placeholder="Entrez un terme à rechercher...">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h5 class="filter-title">Type de discontinuité</h5>
+                        <select id="typeFilter" class="form-select">
+                            <option value="all">Tous les types</option>
+                            <option value="Discontinuité extrémité 1">Extrémité 1</option>
+                            <option value="Discontinuité extrémité 2">Extrémité 2</option>
+                            <option value="Double discontinuité">Double discontinuité</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="text-end mt-3">
+                    <span class="result-summary" id="resultCount"></span>
+                    <button class="btn btn-success" id="exportBtn">Exporter en CSV</button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table class="table table-striped table-hover" id="resultTable">
+                    <thead>
+                        <tr>
+                            <th>cb_code</th>
+                            <th>cb_etiquet</th>
+                            <th>cb_nd1</th>
+                            <th>cb_nd2</th>
+                            <th>cb_bp1</th>
+                            <th>cb_ba1</th>
+                            <th>cb_bp2</th>
+                            <th>cb_ba2</th>
+                            <th>Type_Discontinuité</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultBody">
+                        <!-- Les résultats seront insérés ici via JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropArea = document.getElementById('drop-area');
+            const fileInput = document.getElementById('fileInput');
+            const browseBtn = document.getElementById('browseBtn');
+            const resultSection = document.getElementById('resultSection');
+            const resultBody = document.getElementById('resultBody');
+            const resultCount = document.getElementById('resultCount');
+            const searchInput = document.getElementById('searchInput');
+            const typeFilter = document.getElementById('typeFilter');
+            const exportBtn = document.getElementById('exportBtn');
+            const progressBar = document.querySelector('.progress-bar');
+            const progress = document.querySelector('.progress');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+
+            let allResults = [];
+            let filteredResults = [];
+
+            // Événements pour le drag & drop
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, unhighlight, false);
+            });
+
+            function highlight() {
+                dropArea.classList.add('is-active');
+            }
+
+            function unhighlight() {
+                dropArea.classList.remove('is-active');
+            }
+
+            // Gestion du drop
+            dropArea.addEventListener('drop', handleDrop, false);
+
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFiles(files);
+            }
+
+            // Gestion du clic sur le bouton Parcourir
+            browseBtn.addEventListener('click', function() {
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', function() {
+                handleFiles(this.files);
+            });
+
+            function handleFiles(files) {
+                if (files.length === 0) return;
+                
+                const file = files[0];
+                if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+                    alert('Veuillez sélectionner un fichier CSV valide.');
+                    return;
+                }
+
+                // Afficher le spinner et la barre de progression
+                loadingSpinner.style.display = 'inline-block';
+                progress.style.display = 'block';
+                
+                // Analyser le fichier CSV
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    delimiter: ';', // Utiliser le point-virgule comme séparateur
+                    encoding: "UTF-8",
+                    step: function(results, parser) {
+                        // Mise à jour de la barre de progression
+                        const progress = Math.round((parser.streamer._input.streamer._index / file.size) * 100);
+                        progressBar.style.width = progress + '%';
+                        progressBar.setAttribute('aria-valuenow', progress);
+                    },
+                    complete: function(results) {
+                        console.log('Parsing complete:', results);
+                        
+                        // Cacher le spinner et la barre de progression
+                        loadingSpinner.style.display = 'none';
+                        progress.style.display = 'none';
+                        
+                        // Traiter les résultats
+                        processResults(results.data);
+                    },
+                    error: function(error) {
+                        console.error('Error parsing CSV:', error);
+                        alert('Erreur lors de l\'analyse du fichier CSV. Vérifiez que le format est correct.');
+                        
+                        // Cacher le spinner et la barre de progression
+                        loadingSpinner.style.display = 'none';
+                        progress.style.display = 'none';
+                    }
+                });
+            }
+
+            function processResults(data) {
+                console.log('Processing', data.length, 'rows');
+                allResults = [];
+                
+                // Analyse des données pour trouver les discontinuités
+                data.forEach(row => {
+                    // Vérifier si les colonnes nécessaires existent
+                    const hasRequiredColumns = checkRequiredColumns(row);
+                    if (!hasRequiredColumns) return;
+                    
+                    // Vérifier si les extrémités sont connectées
+                    const isExtremity1Connected = 
+                        (row.cb_bp1 && row.cb_bp1.trim().length > 0) || 
+                        (row.cb_ba1 && row.cb_ba1.trim().length > 0);
+                    
+                    const isExtremity2Connected = 
+                        (row.cb_bp2 && row.cb_bp2.trim().length > 0) || 
+                        (row.cb_ba2 && row.cb_ba2.trim().length > 0);
+                    
+                    // Si au moins une extrémité n'est pas connectée, c'est une discontinuité
+                    if (!isExtremity1Connected || !isExtremity2Connected) {
+                        let discontinuityType = '';
+                        
+                        if (!isExtremity1Connected && !isExtremity2Connected) {
+                            discontinuityType = 'Double discontinuité';
+                        } else if (!isExtremity1Connected) {
+                            discontinuityType = 'Discontinuité extrémité 1';
+                        } else if (!isExtremity2Connected) {
+                            discontinuityType = 'Discontinuité extrémité 2';
+                        }
+                        
+                        // Ajouter les informations de discontinuité
+                        row.Type_Discontinuite = discontinuityType;
+                        row.isExtremity1Connected = isExtremity1Connected;
+                        row.isExtremity2Connected = isExtremity2Connected;
+                        
+                        allResults.push(row);
+                    }
+                });
+                
+                // Afficher les résultats
+                filteredResults = [...allResults];
+                displayResults();
+                resultSection.classList.remove('hidden');
+            }
+
+            function checkRequiredColumns(row) {
+                const requiredColumns = ['cb_bp1', 'cb_ba1', 'cb_bp2', 'cb_ba2'];
+                
+                // Vérifier si les colonnes existent, sinon essayer de les trouver avec des noms similaires
+                for (const column of requiredColumns) {
+                    if (!(column in row)) {
+                        // Essayer de trouver des colonnes avec des noms similaires
+                        let found = false;
+                        for (const key in row) {
+                            if (key.toLowerCase() === column.toLowerCase() || 
+                                key.toLowerCase().includes(column.toLowerCase())) {
+                                row[column] = row[key];
+                                found = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!found) {
+                            // Si on ne trouve toujours pas, créer une colonne vide
+                            row[column] = '';
+                        }
+                    }
+                }
+                
+                // Vérifier aussi cb_code et cb_etiquet
+                if (!('cb_code' in row)) {
+                    // Utiliser la première colonne comme cb_code si elle n'existe pas
+                    const firstKey = Object.keys(row)[0];
+                    row.cb_code = row[firstKey];
+                }
+                
+                if (!('cb_etiquet' in row)) {
+                    // Utiliser la deuxième colonne comme cb_etiquet si elle n'existe pas
+                    const keys = Object.keys(row);
+                    if (keys.length > 1) {
+                        row.cb_etiquet = row[keys[1]];
+                    } else {
+                        row.cb_etiquet = '';
+                    }
+                }
+                
+                // Vérifier aussi cb_nd1 et cb_nd2
+                if (!('cb_nd1' in row)) row.cb_nd1 = '';
+                if (!('cb_nd2' in row)) row.cb_nd2 = '';
+                
+                return true;
+            }
+
+            function displayResults() {
+                resultBody.innerHTML = '';
+                
+                if (filteredResults.length === 0) {
+                    resultCount.textContent = 'Aucune discontinuité trouvée';
+                    
+                    // Ajouter une ligne indiquant aucun résultat
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = '<td colspan="9" class="text-center">Aucune discontinuité trouvée avec les critères actuels</td>';
+                    resultBody.appendChild(tr);
+                    
+                    return;
+                }
+                
+                resultCount.textContent = filteredResults.length + ' discontinuités trouvées';
+                
+                filteredResults.forEach(row => {
+                    const tr = document.createElement('tr');
+                    
+                    // cb_code
+                    tr.innerHTML += `<td>${row.cb_code || ''}</td>`;
+                    
+                    // cb_etiquet
+                    tr.innerHTML += `<td>${row.cb_etiquet || ''}</td>`;
+                    
+                    // cb_nd1
+                    tr.innerHTML += `<td>${row.cb_nd1 || ''}</td>`;
+                    
+                    // cb_nd2
+                    tr.innerHTML += `<td>${row.cb_nd2 || ''}</td>`;
+                    
+                    // cb_bp1 (surligner si discontinuité à l'extrémité 1)
+                    tr.innerHTML += `<td class="${!row.isExtremity1Connected ? 'discontinuity-cell' : ''}">${row.cb_bp1 || ''}</td>`;
+                    
+                    // cb_ba1 (surligner si discontinuité à l'extrémité 1)
+                    tr.innerHTML += `<td class="${!row.isExtremity1Connected ? 'discontinuity-cell' : ''}">${row.cb_ba1 || ''}</td>`;
+                    
+                    // cb_bp2 (surligner si discontinuité à l'extrémité 2)
+                    tr.innerHTML += `<td class="${!row.isExtremity2Connected ? 'discontinuity-cell' : ''}">${row.cb_bp2 || ''}</td>`;
+                    
+                    // cb_ba2 (surligner si discontinuité à l'extrémité 2)
+                    tr.innerHTML += `<td class="${!row.isExtremity2Connected ? 'discontinuity-cell' : ''}">${row.cb_ba2 || ''}</td>`;
+                    
+                    // Type_Discontinuite
+                    tr.innerHTML += `<td>${row.Type_Discontinuite}</td>`;
+                    
+                    resultBody.appendChild(tr);
+                });
+            }
+
+            // Filtre sur la recherche
+            searchInput.addEventListener('input', applyFilters);
+            
+            // Filtre sur le type de discontinuité
+            typeFilter.addEventListener('change', applyFilters);
+            
+            function applyFilters() {
+                const searchText = searchInput.value.toLowerCase();
+                const selectedType = typeFilter.value;
+                
+                filteredResults = allResults.filter(row => {
+                    // Filtre de recherche
+                    const matchesSearch = 
+                        (row.cb_code && row.cb_code.toLowerCase().includes(searchText)) ||
+                        (row.cb_etiquet && row.cb_etiquet.toLowerCase().includes(searchText)) ||
+                        (row.cb_nd1 && row.cb_nd1.toLowerCase().includes(searchText)) ||
+                        (row.cb_nd2 && row.cb_nd2.toLowerCase().includes(searchText));
+                    
+                    // Filtre de type
+                    const matchesType = selectedType === 'all' || row.Type_Discontinuite === selectedType;
+                    
+                    return matchesSearch && matchesType;
+                });
+                
+                displayResults();
+            }
+
+            // Export CSV
+            exportBtn.addEventListener('click', function() {
+                if (filteredResults.length === 0) {
+                    alert('Aucune donnée à exporter.');
+                    return;
+                }
+                
+                // Créer le contenu CSV
+                let csvContent = "data:text/csv;charset=utf-8,";
+                
+                // En-têtes
+                const headers = ["cb_code", "cb_etiquet", "cb_nd1", "cb_nd2", "cb_bp1", "cb_ba1", "cb_bp2", "cb_ba2", "Type_Discontinuite"];
+                csvContent += headers.join(';') + '\r\n';
+                
+                // Lignes de données
+                filteredResults.forEach(row => {
+                    const csvRow = [
+                        row.cb_code || '',
+                        row.cb_etiquet || '',
+                        row.cb_nd1 || '',
+                        row.cb_nd2 || '',
+                        row.cb_bp1 || '',
+                        row.cb_ba1 || '',
+                        row.cb_bp2 || '',
+                        row.cb_ba2 || '',
+                        row.Type_Discontinuite || ''
+                    ];
+                    
+                    csvContent += csvRow.join(';') + '\r\n';
+                });
+                
+                // Créer un lien de téléchargement
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "rapport_discontinuites.csv");
+                document.body.appendChild(link);
+                
+                // Télécharger le fichier
+                link.click();
+                
+                // Nettoyer
+                document.body.removeChild(link);
+            });
+        });
+    </script>
+</body>
+</html>
