@@ -18,11 +18,14 @@ Les discontinuités indiquent potentiellement des problèmes de connexion dans l
 ## Fonctionnalités
 
 - **Chargement de fichiers CSV** : Importez facilement vos données de câbles au format CSV
+- **Support de différents formats CSV** : Compatible avec les séparateurs point-virgule (;), virgule (,) ou tabulation
+- **Détection intelligente des colonnes** : Identifie automatiquement les colonnes importantes même si elles ont des noms différents
 - **Analyse automatique** : Identifie automatiquement les discontinuités selon les critères définis
 - **Statistiques détaillées** : Affiche des métriques claires sur le nombre total de câbles, les discontinuités et leur répartition
 - **Filtrage des résultats** : Possibilité d'afficher uniquement les câbles avec des discontinuités
 - **Export des données** : Exportez les résultats au format CSV pour un traitement ultérieur
 - **Données d'exemple intégrées** : Testez l'application sans avoir à télécharger un fichier CSV
+- **Mode débogage** : Visualisez la structure des données et les colonnes détectées pour résoudre les problèmes
 - **Interface réactive** : Compatible avec tous les appareils (ordinateurs, tablettes, smartphones)
 
 ## Comment utiliser l'application
@@ -31,8 +34,8 @@ Les discontinuités indiquent potentiellement des problèmes de connexion dans l
 
 2. **Chargez votre fichier CSV** :
    - Cliquez sur le bouton "Parcourir" pour sélectionner le fichier CSV contenant les données de câbles
-   - Le fichier doit être au format CSV avec des points-virgules comme séparateurs (`;`)
-   - Les colonnes nécessaires sont : `cb_code`, `cb_etiquet`, `cb_nd1`, `cb_nd2`, `cb_bp1`, `cb_ba1`, `cb_bp2`, `cb_ba2`, `cb_typelog`, `cb_lgreel`
+   - Sélectionnez le type de séparateur utilisé dans votre fichier (point-virgule, virgule ou tabulation)
+   - L'application détectera automatiquement les colonnes importantes, même si elles n'ont pas exactement les noms attendus
 
 3. **Analysez les données** :
    - Cliquez sur le bouton "Analyser" pour lancer l'analyse du fichier
@@ -51,19 +54,33 @@ Les discontinuités indiquent potentiellement des problèmes de connexion dans l
 6. **Exportez les données** :
    - Cliquez sur "Exporter en CSV" pour télécharger les résultats (filtrés ou non)
 
-## Structure des données CSV
+7. **Mode débogage** :
+   - Cliquez sur le bouton "Debug" pour afficher les informations de débogage
+   - Vérifiez comment l'application a détecté les colonnes importantes
+   - Examinez la structure des données pour résoudre les problèmes
 
-L'application attend un fichier CSV avec les colonnes suivantes :
-- `cb_code` : Identifiant unique du câble
-- `cb_etiquet` : Description ou étiquette du câble
-- `cb_nd1` : Identifiant du premier nœud
-- `cb_nd2` : Identifiant du deuxième nœud
-- `cb_bp1` : Point de branchement à l'extrémité 1
-- `cb_ba1` : Point d'arrivée à l'extrémité 1
-- `cb_bp2` : Point de branchement à l'extrémité 2
-- `cb_ba2` : Point d'arrivée à l'extrémité 2
-- `cb_typelog` : Type logique du câble
-- `cb_lgreel` : Longueur réelle du câble
+## Compatibilité des formats CSV
+
+L'application est conçue pour être flexible et peut travailler avec différents formats de fichiers CSV :
+
+1. **Séparateurs pris en charge** :
+   - Point-virgule (;) - format par défaut
+   - Virgule (,)
+   - Tabulation
+
+2. **Noms de colonnes flexibles** :
+   L'application recherche automatiquement les colonnes importantes, même si elles n'ont pas exactement les noms attendus :
+   - Pour `cb_bp1` : accepte aussi "bp1", "branchement_1", etc.
+   - Pour `cb_ba1` : accepte aussi "ba1", "arrivee_1", etc.
+   - Pour `cb_bp2` : accepte aussi "bp2", "branchement_2", etc.
+   - Pour `cb_ba2` : accepte aussi "ba2", "arrivee_2", etc.
+   - Et similaire pour les autres colonnes (code, étiquette, nœuds, etc.)
+
+3. **Valeurs vides** :
+   L'application reconnaît différentes formes de valeurs vides :
+   - Cellules vides
+   - Chaînes de caractères vides
+   - Valeurs NULL
 
 ## Exemple de fichier CSV
 
@@ -74,6 +91,18 @@ FI000016542461;16542461;M-229/30276-FT / PBO-SRO-BPI-11406794-011;CH000004049589
 FI000016546011;16546011;ARM-1830041 / BPE-284/30276-FT;PE000001968054;CH000004049267;;BA000010113076;EN000012149299;;DI;128.19
 FI000047496423;47496423;BPE-02/30003-FT / BPE-154/30276-FT;CH000003120961;CH000004050560;;;;EN000012565617;;TR;3070.79
 ```
+
+## Résolution des problèmes
+
+Si l'application ne détecte pas correctement les discontinuités dans votre fichier CSV :
+
+1. **Vérifiez le séparateur** : Assurez-vous d'avoir sélectionné le bon séparateur (point-virgule, virgule ou tabulation).
+
+2. **Utilisez le mode débogage** : Cliquez sur le bouton "Debug" pour voir :
+   - Comment l'application a mappé les colonnes
+   - La structure du premier enregistrement de vos données
+
+3. **Vérifiez l'encodage du fichier** : Si vous voyez des caractères étranges, votre fichier CSV est peut-être encodé différemment. Essayez de le sauvegarder en UTF-8.
 
 ## Technologie
 
