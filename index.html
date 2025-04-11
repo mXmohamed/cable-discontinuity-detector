@@ -28,6 +28,9 @@
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
             z-index: 1000;
         }
+        .buttons-container {
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
@@ -60,7 +63,9 @@
                     <div class="card-body">
                         <div id="stats">
                             <p>Câbles analysés: <span id="totalCables">0</span></p>
-                            <p>Câbles avec discontinuités: <span id="totalDiscontinuites">0</span></p>
+                            <p>Discontinuités extrémité 1: <span id="ext1Count">0</span></p>
+                            <p>Discontinuités extrémité 2: <span id="ext2Count">0</span></p>
+                            <p>Câbles totalement discontinus: <span id="bothCount">0</span></p>
                         </div>
                     </div>
                 </div>
@@ -68,16 +73,13 @@
         </div>
 
         <div class="card mb-4">
-            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+            <div class="card-header bg-success text-white">
                 <h5 class="card-title mb-0">Résultats de l'analyse</h5>
-                <div>
-                    <button id="filterBtn" class="btn btn-light btn-sm">Afficher uniquement les discontinuités</button>
-                </div>
             </div>
             <div class="card-body">
-                <div id="rawData" style="max-height: 200px; overflow-y: auto; margin-bottom: 20px; display: none;">
-                    <h5>Premières lignes des données brutes:</h5>
-                    <pre id="rawDataContent"></pre>
+                <div class="buttons-container">
+                    <button id="filterBtn" class="btn btn-outline-primary btn-sm">Afficher uniquement les discontinuités</button>
+                    <button id="exportBtn" class="btn btn-outline-success btn-sm" disabled>Exporter les discontinuités en CSV</button>
                 </div>
                 <div class="table-container">
                     <table id="resultTable" class="table table-striped table-bordered">
@@ -89,7 +91,9 @@
                                 <th>Extrémité 1 (BA1)</th>
                                 <th>Extrémité 2 (BP2)</th>
                                 <th>Extrémité 2 (BA2)</th>
-                                <th>Discontinuité</th>
+                                <th>Discontinuité Ext.1</th>
+                                <th>Discontinuité Ext.2</th>
+                                <th>Totalement Discontinu</th>
                             </tr>
                         </thead>
                         <tbody id="resultBody">
@@ -116,12 +120,13 @@
             const csvFileInput = document.getElementById('csvFile');
             const analyseBtn = document.getElementById('analyseBtn');
             const filterBtn = document.getElementById('filterBtn');
+            const exportBtn = document.getElementById('exportBtn');
             const resultBody = document.getElementById('resultBody');
             const loading = document.getElementById('loading');
             const totalCables = document.getElementById('totalCables');
-            const totalDiscontinuites = document.getElementById('totalDiscontinuites');
-            const rawData = document.getElementById('rawData');
-            const rawDataContent = document.getElementById('rawDataContent');
+            const ext1Count = document.getElementById('ext1Count');
+            const ext2Count = document.getElementById('ext2Count');
+            const bothCount = document.getElementById('bothCount');
 
             // Variables globales
             let allData = [];
@@ -133,14 +138,6 @@
                 return value === undefined || value === null || value === "" || value.toString().trim() === "";
             }
 
-            // Fonction pour vérifier si un câble a une discontinuité
-            function hasDiscontinuity(row) {
-                const extremite1Vide = isEmpty(row.cb_bp1) && isEmpty(row.cb_ba1);
-                const extremite2Vide = isEmpty(row.cb_bp2) && isEmpty(row.cb_ba2);
-                
-                return extremite1Vide || extremite2Vide;
-            }
-
             // Fonction pour analyser le fichier CSV
             function analyseCSV(file) {
                 loading.style.display = 'block';
@@ -150,15 +147,9 @@
                     delimiter: ';',
                     skipEmptyLines: true,
                     complete: function(results) {
-                        // Afficher les données brutes pour débogage
-                        if (results.data.length > 0) {
-                            const firstRows = results.data.slice(0, 3);
-                            rawDataContent.textContent = JSON.stringify(firstRows, null, 2);
-                            rawData.style.display = 'block';
-                        }
-                        
                         processData(results.data);
                         loading.style.display = 'none';
+                        exportBtn.disabled = false;
                     },
                     error: function(error) {
                         console.error('Erreur lors de l\'analyse du CSV:', error);
@@ -172,16 +163,30 @@
             function processData(data) {
                 allData = data;
                 
-                // Filtrer les discontinuités
-                discontinuitesData = data.filter(row => hasDiscontinuity(row));
+                // Préparer les statistiques
+                let ext1DiscCount = 0;
+                let ext2DiscCount = 0;
+                let bothDiscCount = 0;
                 
-                // Calculer les statistiques
-                const totalCount = data.length;
-                const discontinuitesCount = discontinuitesData.length;
+                // Ajouter des propriétés de discontinuité à chaque ligne
+                data.forEach(row => {
+                    row.extremite1Vide = isEmpty(row.cb_bp1) && isEmpty(row.cb_ba1);
+                    row.extremite2Vide = isEmpty(row.cb_bp2) && isEmpty(row.cb_ba2);
+                    row.totalementDiscontinue = row.extremite1Vide && row.extremite2Vide;
+                    
+                    if (row.extremite1Vide) ext1DiscCount++;
+                    if (row.extremite2Vide) ext2DiscCount++;
+                    if (row.totalementDiscontinue) bothDiscCount++;
+                });
+                
+                // Filtrer les discontinuités (ext1 OU ext2)
+                discontinuitesData = data.filter(row => row.extremite1Vide || row.extremite2Vide);
                 
                 // Mettre à jour les statistiques
-                totalCables.textContent = totalCount;
-                totalDiscontinuites.textContent = discontinuitesCount;
+                totalCables.textContent = data.length;
+                ext1Count.textContent = ext1DiscCount;
+                ext2Count.textContent = ext2DiscCount;
+                bothCount.textContent = bothDiscCount;
                 
                 // Afficher les données dans le tableau
                 renderTable(showOnlyDiscontinuites ? discontinuitesData : data);
@@ -192,12 +197,8 @@
                 resultBody.innerHTML = '';
                 
                 data.forEach(row => {
-                    const extremite1Vide = isEmpty(row.cb_bp1) && isEmpty(row.cb_ba1);
-                    const extremite2Vide = isEmpty(row.cb_bp2) && isEmpty(row.cb_ba2);
-                    const hasDiscontinuity = extremite1Vide || extremite2Vide;
-                    
                     const tr = document.createElement('tr');
-                    if (hasDiscontinuity) {
+                    if (row.extremite1Vide || row.extremite2Vide) {
                         tr.classList.add('table-danger');
                     }
                     
@@ -208,11 +209,53 @@
                         <td>${row.cb_ba1 || ''}</td>
                         <td>${row.cb_bp2 || ''}</td>
                         <td>${row.cb_ba2 || ''}</td>
-                        <td>${hasDiscontinuity ? 'Oui' : 'Non'}</td>
+                        <td>${row.extremite1Vide ? 'Oui' : 'Non'}</td>
+                        <td>${row.extremite2Vide ? 'Oui' : 'Non'}</td>
+                        <td>${row.totalementDiscontinue ? 'Oui' : 'Non'}</td>
                     `;
                     
                     resultBody.appendChild(tr);
                 });
+            }
+
+            // Fonction pour exporter les discontinuités en CSV
+            function exportDiscontinuities() {
+                if (discontinuitesData.length === 0) {
+                    alert('Aucune discontinuité à exporter');
+                    return;
+                }
+                
+                // Préparer les données pour l'export (uniquement les champs importants)
+                const dataToExport = discontinuitesData.map(row => ({
+                    cb_code: row.cb_code || '',
+                    cb_etiquet: row.cb_etiquet || '',
+                    cb_bp1: row.cb_bp1 || '',
+                    cb_ba1: row.cb_ba1 || '',
+                    cb_bp2: row.cb_bp2 || '',
+                    cb_ba2: row.cb_ba2 || '',
+                    discontinuite_ext1: row.extremite1Vide ? 'Oui' : 'Non',
+                    discontinuite_ext2: row.extremite2Vide ? 'Oui' : 'Non',
+                    totalement_discontinu: row.totalementDiscontinue ? 'Oui' : 'Non'
+                }));
+                
+                // Générer le CSV
+                const csv = Papa.unparse(dataToExport, {
+                    delimiter: ';',
+                    header: true
+                });
+                
+                // Créer un objet Blob et un lien de téléchargement
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                
+                link.setAttribute('href', url);
+                link.setAttribute('download', 'discontinuites_cables.csv');
+                link.style.visibility = 'hidden';
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
             }
 
             // Gestionnaires d'événements
@@ -232,6 +275,8 @@
                     : 'Afficher uniquement les discontinuités';
                 renderTable(showOnlyDiscontinuites ? discontinuitesData : allData);
             });
+
+            exportBtn.addEventListener('click', exportDiscontinuities);
 
             // Chargez le fichier automatiquement s'il y en a un
             csvFileInput.addEventListener('change', function() {
