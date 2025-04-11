@@ -75,6 +75,10 @@
                 </div>
             </div>
             <div class="card-body">
+                <div id="rawData" style="max-height: 200px; overflow-y: auto; margin-bottom: 20px; display: none;">
+                    <h5>Premières lignes des données brutes:</h5>
+                    <pre id="rawDataContent"></pre>
+                </div>
                 <div class="table-container">
                     <table id="resultTable" class="table table-striped table-bordered">
                         <thead>
@@ -116,16 +120,23 @@
             const loading = document.getElementById('loading');
             const totalCables = document.getElementById('totalCables');
             const totalDiscontinuites = document.getElementById('totalDiscontinuites');
+            const rawData = document.getElementById('rawData');
+            const rawDataContent = document.getElementById('rawDataContent');
 
             // Variables globales
             let allData = [];
             let discontinuitesData = [];
             let showOnlyDiscontinuites = false;
 
+            // Fonction pour vérifier si une valeur est vide
+            function isEmpty(value) {
+                return value === undefined || value === null || value === "" || value.toString().trim() === "";
+            }
+
             // Fonction pour vérifier si un câble a une discontinuité
             function hasDiscontinuity(row) {
-                const extremite1Vide = (!row.cb_bp1 || row.cb_bp1 === '') && (!row.cb_ba1 || row.cb_ba1 === '');
-                const extremite2Vide = (!row.cb_bp2 || row.cb_bp2 === '') && (!row.cb_ba2 || row.cb_ba2 === '');
+                const extremite1Vide = isEmpty(row.cb_bp1) && isEmpty(row.cb_ba1);
+                const extremite2Vide = isEmpty(row.cb_bp2) && isEmpty(row.cb_ba2);
                 
                 return extremite1Vide || extremite2Vide;
             }
@@ -139,6 +150,13 @@
                     delimiter: ';',
                     skipEmptyLines: true,
                     complete: function(results) {
+                        // Afficher les données brutes pour débogage
+                        if (results.data.length > 0) {
+                            const firstRows = results.data.slice(0, 3);
+                            rawDataContent.textContent = JSON.stringify(firstRows, null, 2);
+                            rawData.style.display = 'block';
+                        }
+                        
                         processData(results.data);
                         loading.style.display = 'none';
                     },
@@ -174,8 +192,8 @@
                 resultBody.innerHTML = '';
                 
                 data.forEach(row => {
-                    const extremite1Vide = (!row.cb_bp1 || row.cb_bp1 === '') && (!row.cb_ba1 || row.cb_ba1 === '');
-                    const extremite2Vide = (!row.cb_bp2 || row.cb_bp2 === '') && (!row.cb_ba2 || row.cb_ba2 === '');
+                    const extremite1Vide = isEmpty(row.cb_bp1) && isEmpty(row.cb_ba1);
+                    const extremite2Vide = isEmpty(row.cb_bp2) && isEmpty(row.cb_ba2);
                     const hasDiscontinuity = extremite1Vide || extremite2Vide;
                     
                     const tr = document.createElement('tr');
