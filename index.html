@@ -76,6 +76,10 @@
         #loadingSpinner {
             display: none;
         }
+        #statusMessage {
+            margin-top: 10px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -102,6 +106,7 @@
             <div id="loadingSpinner" class="spinner-border text-primary mt-3" role="status">
                 <span class="visually-hidden">Chargement...</span>
             </div>
+            <div id="statusMessage" class="text-center"></div>
         </div>
 
         <div id="resultSection" class="hidden">
@@ -168,9 +173,11 @@
             const progressBar = document.querySelector('.progress-bar');
             const progress = document.querySelector('.progress');
             const loadingSpinner = document.getElementById('loadingSpinner');
+            const statusMessage = document.getElementById('statusMessage');
 
             let allResults = [];
             let filteredResults = [];
+            let isProcessing = false;
 
             // Événements pour le drag & drop
             ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -217,95 +224,161 @@
             });
 
             function handleFiles(files) {
+                if (isProcessing) {
+                    alert('Un traitement est déjà en cours. Veuillez patienter.');
+                    return;
+                }
+                
                 if (files.length === 0) return;
                 
                 const file = files[0];
-                if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+                if (!file.name.endsWith('.csv')) {
                     alert('Veuillez sélectionner un fichier CSV valide.');
                     return;
                 }
 
+                // Réinitialiser les résultats précédents
+                allResults = [];
+                filteredResults = [];
+                resultSection.classList.add('hidden');
+                
                 // Afficher le spinner et la barre de progression
                 loadingSpinner.style.display = 'inline-block';
                 progress.style.display = 'block';
+                progressBar.style.width = '0%';
+                progressBar.setAttribute('aria-valuenow', 0);
+                statusMessage.textContent = 'Préparation de l\'analyse...';
                 
-                // Analyser le fichier CSV
+                // Marquer comme en cours de traitement
+                isProcessing = true;
+                
+                // Traitement par lots
+                const totalRows = [];
+                let processedRows = 0;
+                let totalSize = file.size;
+                
+                // Configurer PapaParse pour le traitement par lots
                 Papa.parse(file, {
                     header: true,
                     skipEmptyLines: true,
-                    delimiter: ';', // Utiliser le point-virgule comme séparateur
-                    encoding: "UTF-8",
-                    step: function(results, parser) {
-                        // Mise à jour de la barre de progression
-                        const progress = Math.round((parser.streamer._input.streamer._index / file.size) * 100);
-                        progressBar.style.width = progress + '%';
-                        progressBar.setAttribute('aria-valuenow', progress);
+                    delimiter: ';',  // Point-virgule fixe comme séparateur
+                    encoding: "UTF-8", // UTF-8 fixe comme encodage
+                    chunk: function(results, parser) {
+                        try {
+                            // Mettre à jour la barre de progression
+                            const bytesProcessed = parser.streamer._input.streamer._input.file.loaded || 0;
+                            const progress = Math.round((bytesProcessed / totalSize) * 70); // Max 70% pendant le parsing
+                            progressBar.style.width = progress + '%';
+                            progressBar.setAttribute('aria-valuenow', progress);
+                            
+                            // Traiter les données de ce lot
+                            processedRows += results.data.length;
+                            statusMessage.textContent = `Analyse en cours... ${processedRows} lignes traitées`;
+                            
+                            // Traiter les données et stocker les résultats
+                            const chunkResults = processResults(results.data);
+                            totalRows.push(...chunkResults);
+                            
+                            // Pause pour permettre au navigateur de respirer
+                            setTimeout(function() {
+                                parser.resume();
+                            }, 0);
+                        } catch (e) {
+                            console.error("Erreur lors du traitement du lot:", e);
+                            statusMessage.textContent = "Erreur pendant le traitement: " + e.message;
+                            parser.abort();
+                            isProcessing = false;
+                        }
                     },
-                    complete: function(results) {
-                        console.log('Parsing complete:', results);
-                        
-                        // Cacher le spinner et la barre de progression
-                        loadingSpinner.style.display = 'none';
-                        progress.style.display = 'none';
-                        
-                        // Traiter les résultats
-                        processResults(results.data);
+                    complete: function() {
+                        try {
+                            // Mise à jour finale de la progression
+                            progressBar.style.width = '90%';
+                            progressBar.setAttribute('aria-valuenow', 90);
+                            statusMessage.textContent = 'Finalisation du traitement...';
+                            
+                            // Afficher les résultats
+                            setTimeout(function() {
+                                allResults = totalRows;
+                                filteredResults = [...allResults];
+                                
+                                // Finaliser l'affichage
+                                progressBar.style.width = '100%';
+                                progressBar.setAttribute('aria-valuenow', 100);
+                                displayResults();
+                                resultSection.classList.remove('hidden');
+                                
+                                // Nettoyer l'UI
+                                loadingSpinner.style.display = 'none';
+                                progress.style.display = 'none';
+                                statusMessage.textContent = `Analyse terminée: ${processedRows} lignes traitées, ${allResults.length} discontinuités trouvées.`;
+                                isProcessing = false;
+                            }, 200);
+                        } catch (e) {
+                            console.error("Erreur lors de la finalisation:", e);
+                            statusMessage.textContent = "Erreur lors de la finalisation: " + e.message;
+                            isProcessing = false;
+                            loadingSpinner.style.display = 'none';
+                            progress.style.display = 'none';
+                        }
                     },
                     error: function(error) {
                         console.error('Error parsing CSV:', error);
-                        alert('Erreur lors de l\'analyse du fichier CSV. Vérifiez que le format est correct.');
+                        alert('Erreur lors de l\'analyse du fichier CSV: ' + error.message);
                         
                         // Cacher le spinner et la barre de progression
                         loadingSpinner.style.display = 'none';
                         progress.style.display = 'none';
+                        statusMessage.textContent = 'Erreur: ' + error.message;
+                        isProcessing = false;
                     }
                 });
             }
 
             function processResults(data) {
-                console.log('Processing', data.length, 'rows');
-                allResults = [];
+                const results = [];
                 
                 // Analyse des données pour trouver les discontinuités
                 data.forEach(row => {
-                    // Vérifier si les colonnes nécessaires existent
-                    const hasRequiredColumns = checkRequiredColumns(row);
-                    if (!hasRequiredColumns) return;
-                    
-                    // Vérifier si les extrémités sont connectées
-                    const isExtremity1Connected = 
-                        (row.cb_bp1 && row.cb_bp1.trim().length > 0) || 
-                        (row.cb_ba1 && row.cb_ba1.trim().length > 0);
-                    
-                    const isExtremity2Connected = 
-                        (row.cb_bp2 && row.cb_bp2.trim().length > 0) || 
-                        (row.cb_ba2 && row.cb_ba2.trim().length > 0);
-                    
-                    // Si au moins une extrémité n'est pas connectée, c'est une discontinuité
-                    if (!isExtremity1Connected || !isExtremity2Connected) {
-                        let discontinuityType = '';
+                    try {
+                        // Vérifier si les colonnes nécessaires existent
+                        const hasRequiredColumns = checkRequiredColumns(row);
+                        if (!hasRequiredColumns) return;
                         
-                        if (!isExtremity1Connected && !isExtremity2Connected) {
-                            discontinuityType = 'Double discontinuité';
-                        } else if (!isExtremity1Connected) {
-                            discontinuityType = 'Discontinuité extrémité 1';
-                        } else if (!isExtremity2Connected) {
-                            discontinuityType = 'Discontinuité extrémité 2';
+                        // Vérifier si les extrémités sont connectées
+                        const isExtremity1Connected = 
+                            (row.cb_bp1 && row.cb_bp1.trim().length > 0) || 
+                            (row.cb_ba1 && row.cb_ba1.trim().length > 0);
+                        
+                        const isExtremity2Connected = 
+                            (row.cb_bp2 && row.cb_bp2.trim().length > 0) || 
+                            (row.cb_ba2 && row.cb_ba2.trim().length > 0);
+                        
+                        // Si au moins une extrémité n'est pas connectée, c'est une discontinuité
+                        if (!isExtremity1Connected || !isExtremity2Connected) {
+                            let discontinuityType = '';
+                            
+                            if (!isExtremity1Connected && !isExtremity2Connected) {
+                                discontinuityType = 'Double discontinuité';
+                            } else if (!isExtremity1Connected) {
+                                discontinuityType = 'Discontinuité extrémité 1';
+                            } else if (!isExtremity2Connected) {
+                                discontinuityType = 'Discontinuité extrémité 2';
+                            }
+                            
+                            // Ajouter les informations de discontinuité
+                            row.Type_Discontinuite = discontinuityType;
+                            row.isExtremity1Connected = isExtremity1Connected;
+                            row.isExtremity2Connected = isExtremity2Connected;
+                            
+                            results.push(row);
                         }
-                        
-                        // Ajouter les informations de discontinuité
-                        row.Type_Discontinuite = discontinuityType;
-                        row.isExtremity1Connected = isExtremity1Connected;
-                        row.isExtremity2Connected = isExtremity2Connected;
-                        
-                        allResults.push(row);
+                    } catch (e) {
+                        console.error("Erreur lors du traitement d'une ligne:", e, row);
                     }
                 });
                 
-                // Afficher les résultats
-                filteredResults = [...allResults];
-                displayResults();
-                resultSection.classList.remove('hidden');
+                return results;
             }
 
             function checkRequiredColumns(row) {
@@ -336,14 +409,14 @@
                 if (!('cb_code' in row)) {
                     // Utiliser la première colonne comme cb_code si elle n'existe pas
                     const firstKey = Object.keys(row)[0];
-                    row.cb_code = row[firstKey];
+                    row.cb_code = row[firstKey] || '';
                 }
                 
                 if (!('cb_etiquet' in row)) {
                     // Utiliser la deuxième colonne comme cb_etiquet si elle n'existe pas
                     const keys = Object.keys(row);
                     if (keys.length > 1) {
-                        row.cb_etiquet = row[keys[1]];
+                        row.cb_etiquet = row[keys[1]] || '';
                     } else {
                         row.cb_etiquet = '';
                     }
@@ -372,7 +445,11 @@
                 
                 resultCount.textContent = filteredResults.length + ' discontinuités trouvées';
                 
-                filteredResults.forEach(row => {
+                // Limiter l'affichage à 1000 lignes pour éviter de bloquer le navigateur
+                const displayLimit = 1000;
+                const displayRows = filteredResults.slice(0, displayLimit);
+                
+                displayRows.forEach(row => {
                     const tr = document.createElement('tr');
                     
                     // cb_code
@@ -404,6 +481,13 @@
                     
                     resultBody.appendChild(tr);
                 });
+                
+                // Ajouter un message si l'affichage est limité
+                if (filteredResults.length > displayLimit) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td colspan="9" class="text-center">Affichage limité à ${displayLimit} lignes sur ${filteredResults.length} résultats. Utilisez l'export CSV pour accéder à tous les résultats.</td>`;
+                    resultBody.appendChild(tr);
+                }
             }
 
             // Filtre sur la recherche
@@ -418,7 +502,7 @@
                 
                 filteredResults = allResults.filter(row => {
                     // Filtre de recherche
-                    const matchesSearch = 
+                    const matchesSearch = searchText === '' || 
                         (row.cb_code && row.cb_code.toLowerCase().includes(searchText)) ||
                         (row.cb_etiquet && row.cb_etiquet.toLowerCase().includes(searchText)) ||
                         (row.cb_nd1 && row.cb_nd1.toLowerCase().includes(searchText)) ||
