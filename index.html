@@ -42,6 +42,20 @@
             margin-bottom: 20px;
             border-bottom: 1px solid #e9ecef;
         }
+        .debug-section {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .debug-section pre {
+            max-height: 150px;
+            overflow-y: auto;
+            background-color: #f1f1f1;
+            padding: 10px;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
@@ -61,6 +75,14 @@
                         <div class="mb-3">
                             <label for="csvFile" class="form-label">Sélectionnez un fichier CSV</label>
                             <input class="form-control" type="file" id="csvFile" accept=".csv">
+                        </div>
+                        <div class="mb-3">
+                            <label for="delimiterSelect" class="form-label">Séparateur CSV</label>
+                            <select class="form-select" id="delimiterSelect">
+                                <option value=";" selected>Point-virgule (;)</option>
+                                <option value=",">Virgule (,)</option>
+                                <option value="\t">Tabulation</option>
+                            </select>
                         </div>
                         <button id="analyseBtn" class="btn btn-primary">Analyser</button>
                         <button id="loadSampleBtn" class="btn btn-secondary">Charger l'exemple</button>
@@ -94,6 +116,7 @@
                 <div>
                     <button id="exportBtn" class="btn btn-light btn-sm" disabled>Exporter en CSV</button>
                     <button id="filterBtn" class="btn btn-light btn-sm">Afficher uniquement les discontinuités</button>
+                    <button id="debugBtn" class="btn btn-warning btn-sm">Debug</button>
                 </div>
             </div>
             <div class="card-body">
@@ -119,6 +142,12 @@
                         </tbody>
                     </table>
                 </div>
+                
+                <div id="debugSection" class="debug-section" style="display: none;">
+                    <h5>Informations de débogage</h5>
+                    <p>Structure des données détectées:</p>
+                    <pre id="debugInfo"></pre>
+                </div>
             </div>
         </div>
     </div>
@@ -136,10 +165,12 @@
         document.addEventListener('DOMContentLoaded', function() {
             // Éléments DOM
             const csvFileInput = document.getElementById('csvFile');
+            const delimiterSelect = document.getElementById('delimiterSelect');
             const analyseBtn = document.getElementById('analyseBtn');
             const loadSampleBtn = document.getElementById('loadSampleBtn');
             const exportBtn = document.getElementById('exportBtn');
             const filterBtn = document.getElementById('filterBtn');
+            const debugBtn = document.getElementById('debugBtn');
             const resultBody = document.getElementById('resultBody');
             const loading = document.getElementById('loading');
             const totalCables = document.getElementById('totalCables');
@@ -148,11 +179,25 @@
             const extremite1El = document.getElementById('extremite1');
             const extremite2El = document.getElementById('extremite2');
             const deuxExtremitesEl = document.getElementById('deuxExtremites');
+            const debugSection = document.getElementById('debugSection');
+            const debugInfo = document.getElementById('debugInfo');
 
             // Variables globales
             let allData = [];
             let discontinuitesData = [];
             let showOnlyDiscontinuites = false;
+            let columnMappings = {
+                bp1: 'cb_bp1',
+                ba1: 'cb_ba1',
+                bp2: 'cb_bp2',
+                ba2: 'cb_ba2',
+                code: 'cb_code',
+                etiquet: 'cb_etiquet',
+                nd1: 'cb_nd1',
+                nd2: 'cb_nd2',
+                typelog: 'cb_typelog',
+                lgreel: 'cb_lgreel'
+            };
 
             // Exemple de données
             const sampleData = `cb_code;cb_codeext;cb_abandon;cb_perirec;cb_etiquet;cb_nd1;cb_nd2;cb_bp1;cb_ba1;cb_bp2;cb_ba2;cb_r1_code;cb_r2_code;cb_r3_code;cb_fo_type;cb_prop;cb_gest;cb_proptyp;cb_statut;cb_dateins;cb_avct;cb_typephy;cb_typelog;cb_rf_code;cb_capafo;cb_fo_disp;cb_fo_util;cb_modulo;cb_cabphy;cb_lgreel;cb_r4_code;cb_user;cb_etat;cb_datemes;cb_tech;cb_diam;cb_color;cb_localis;cb_comment;cb_creadat;cb_majdate;cb_majsrc;cb_abddate;cb_abdsrc
@@ -166,10 +211,63 @@ FI000017246473;17246473;0;; mM-AC4/30276-FT / ARM-1830041 / ST LAURENT D'AIGOUZE
 FI000016546010;16546010;0;;ARM-1830041 / M-229/30276-FT / ST LAURENT D'AIGOUZE;PE000001968054;CH000004049589;;BA000010113076;EN000012149297;;WIGA;ZN3010000263;ZS0000SRO-BPI-11406794;G657A2;PCAB0000000225;GCAB0000000198;CST;REC;2019-11-21 14-53-53;E;C;DI;FI000000000711;144;;;12;16546010;116.28;;;;;;;;;;;;;;
 FI000047496423;47496423;0;;BPE-02/30003-FT / BPE-154/30276-FT / AIGUES MORTES;CH000003120961;CH000004050560;;;;EN000012565617;;WIGA;ZN3010000263;;G657A;PCAB0000000225;GCAB0000000198;CST;REC;2024-11-08 00-00-00;E;C;TR;FI000000000508;288;;;12;47496423;3070.79;;;;;;;;;;;;;;`;
             
+            // Fonction pour détecter les colonnes importantes
+            function detectColumnMappings(headers) {
+                const mappings = {
+                    bp1: null,
+                    ba1: null,
+                    bp2: null,
+                    ba2: null,
+                    code: null,
+                    etiquet: null,
+                    nd1: null, 
+                    nd2: null,
+                    typelog: null,
+                    lgreel: null
+                };
+                
+                // Liste des noms possibles pour chaque type de colonne
+                const possibleNames = {
+                    bp1: ['cb_bp1', 'bp1', 'branchement_1', 'point_branchement_1'],
+                    ba1: ['cb_ba1', 'ba1', 'arrivee_1', 'point_arrivee_1'],
+                    bp2: ['cb_bp2', 'bp2', 'branchement_2', 'point_branchement_2'],
+                    ba2: ['cb_ba2', 'ba2', 'arrivee_2', 'point_arrivee_2'],
+                    code: ['cb_code', 'code', 'id', 'identifiant'],
+                    etiquet: ['cb_etiquet', 'etiquet', 'etiquette', 'description', 'nom'],
+                    nd1: ['cb_nd1', 'nd1', 'noeud_1', 'node_1'],
+                    nd2: ['cb_nd2', 'nd2', 'noeud_2', 'node_2'],
+                    typelog: ['cb_typelog', 'typelog', 'type', 'type_logique'],
+                    lgreel: ['cb_lgreel', 'lgreel', 'longueur', 'length']
+                };
+                
+                // Pour chaque en-tête, vérifier s'il correspond à l'un des noms possibles
+                headers.forEach(header => {
+                    const headerLower = header.toLowerCase();
+                    
+                    for (const [type, names] of Object.entries(possibleNames)) {
+                        if (names.some(name => headerLower === name.toLowerCase())) {
+                            mappings[type] = header;
+                        }
+                    }
+                });
+                
+                // Si on n'a pas trouvé certaines colonnes critiques, on utilise les valeurs par défaut
+                if (!mappings.bp1) mappings.bp1 = 'cb_bp1';
+                if (!mappings.ba1) mappings.ba1 = 'cb_ba1';
+                if (!mappings.bp2) mappings.bp2 = 'cb_bp2';
+                if (!mappings.ba2) mappings.ba2 = 'cb_ba2';
+                
+                return mappings;
+            }
+            
             // Fonction pour vérifier si un câble a une discontinuité
             function hasDiscontinuity(row) {
-                const extremite1Vide = (!row.cb_bp1 || row.cb_bp1 === '') && (!row.cb_ba1 || row.cb_ba1 === '');
-                const extremite2Vide = (!row.cb_bp2 || row.cb_bp2 === '') && (!row.cb_ba2 || row.cb_ba2 === '');
+                const extremite1Vide = (row[columnMappings.bp1] === undefined || row[columnMappings.bp1] === null || row[columnMappings.bp1] === '') && 
+                                      (row[columnMappings.ba1] === undefined || row[columnMappings.ba1] === null || row[columnMappings.ba1] === '');
+                
+                const extremite2Vide = (row[columnMappings.bp2] === undefined || row[columnMappings.bp2] === null || row[columnMappings.bp2] === '') && 
+                                      (row[columnMappings.ba2] === undefined || row[columnMappings.ba2] === null || row[columnMappings.ba2] === '');
+                
                 return extremite1Vide || extremite2Vide;
             }
 
@@ -177,11 +275,21 @@ FI000047496423;47496423;0;;BPE-02/30003-FT / BPE-154/30276-FT / AIGUES MORTES;CH
             function analyseCSV(file) {
                 loading.style.display = 'block';
                 
+                const delimiter = delimiterSelect.value;
+                
                 Papa.parse(file, {
                     header: true,
-                    delimiter: ';', // Délimiteur pour les fichiers CSV français
+                    delimiter: delimiter,
                     skipEmptyLines: true,
                     complete: function(results) {
+                        // Détecter les colonnes importantes
+                        if (results.meta && results.meta.fields) {
+                            columnMappings = detectColumnMappings(results.meta.fields);
+                        }
+                        
+                        // Afficher les informations de débogage
+                        debugInfo.textContent = `Mappings des colonnes détectés:\n${JSON.stringify(columnMappings, null, 2)}\n\nPremier enregistrement:\n${JSON.stringify(results.data[0], null, 2)}`;
+                        
                         processData(results.data);
                         loading.style.display = 'none';
                         exportBtn.disabled = false;
@@ -198,11 +306,21 @@ FI000047496423;47496423;0;;BPE-02/30003-FT / BPE-154/30276-FT / AIGUES MORTES;CH
             function analyseCSVString(csvString) {
                 loading.style.display = 'block';
                 
+                const delimiter = delimiterSelect.value;
+                
                 const results = Papa.parse(csvString, {
                     header: true,
-                    delimiter: ';',
+                    delimiter: delimiter,
                     skipEmptyLines: true
                 });
+                
+                // Détecter les colonnes importantes
+                if (results.meta && results.meta.fields) {
+                    columnMappings = detectColumnMappings(results.meta.fields);
+                }
+                
+                // Afficher les informations de débogage
+                debugInfo.textContent = `Mappings des colonnes détectés:\n${JSON.stringify(columnMappings, null, 2)}\n\nPremier enregistrement:\n${JSON.stringify(results.data[0], null, 2)}`;
                 
                 processData(results.data);
                 loading.style.display = 'none';
@@ -219,20 +337,24 @@ FI000047496423;47496423;0;;BPE-02/30003-FT / BPE-154/30276-FT / AIGUES MORTES;CH
                 // Calculer les statistiques
                 const totalCount = data.length;
                 const discontinuitesCount = discontinuitesData.length;
-                const percentage = (discontinuitesCount / totalCount * 100).toFixed(2);
+                const percentage = totalCount > 0 ? (discontinuitesCount / totalCount * 100).toFixed(2) : "0.00";
                 
                 // Analyser les types de discontinuités
                 const extremite1Count = discontinuitesData.filter(row => 
-                    (!row.cb_bp1 || row.cb_bp1 === '') && (!row.cb_ba1 || row.cb_ba1 === '')
+                    (row[columnMappings.bp1] === undefined || row[columnMappings.bp1] === null || row[columnMappings.bp1] === '') && 
+                    (row[columnMappings.ba1] === undefined || row[columnMappings.ba1] === null || row[columnMappings.ba1] === '')
                 ).length;
                 
                 const extremite2Count = discontinuitesData.filter(row => 
-                    (!row.cb_bp2 || row.cb_bp2 === '') && (!row.cb_ba2 || row.cb_ba2 === '')
+                    (row[columnMappings.bp2] === undefined || row[columnMappings.bp2] === null || row[columnMappings.bp2] === '') && 
+                    (row[columnMappings.ba2] === undefined || row[columnMappings.ba2] === null || row[columnMappings.ba2] === '')
                 ).length;
                 
                 const deuxExtremitesCount = discontinuitesData.filter(row => 
-                    ((!row.cb_bp1 || row.cb_bp1 === '') && (!row.cb_ba1 || row.cb_ba1 === '')) &&
-                    ((!row.cb_bp2 || row.cb_bp2 === '') && (!row.cb_ba2 || row.cb_ba2 === ''))
+                    ((row[columnMappings.bp1] === undefined || row[columnMappings.bp1] === null || row[columnMappings.bp1] === '') && 
+                     (row[columnMappings.ba1] === undefined || row[columnMappings.ba1] === null || row[columnMappings.ba1] === '')) &&
+                    ((row[columnMappings.bp2] === undefined || row[columnMappings.bp2] === null || row[columnMappings.bp2] === '') && 
+                     (row[columnMappings.ba2] === undefined || row[columnMappings.ba2] === null || row[columnMappings.ba2] === ''))
                 ).length;
                 
                 // Mettre à jour les statistiques
@@ -254,9 +376,13 @@ FI000047496423;47496423;0;;BPE-02/30003-FT / BPE-154/30276-FT / AIGUES MORTES;CH
                 resultBody.innerHTML = '';
                 
                 data.forEach(row => {
-                    const hasDiscontinuity = 
-                        ((!row.cb_bp1 || row.cb_bp1 === '') && (!row.cb_ba1 || row.cb_ba1 === '')) ||
-                        ((!row.cb_bp2 || row.cb_bp2 === '') && (!row.cb_ba2 || row.cb_ba2 === ''));
+                    const extremite1Vide = (row[columnMappings.bp1] === undefined || row[columnMappings.bp1] === null || row[columnMappings.bp1] === '') && 
+                                         (row[columnMappings.ba1] === undefined || row[columnMappings.ba1] === null || row[columnMappings.ba1] === '');
+                    
+                    const extremite2Vide = (row[columnMappings.bp2] === undefined || row[columnMappings.bp2] === null || row[columnMappings.bp2] === '') && 
+                                         (row[columnMappings.ba2] === undefined || row[columnMappings.ba2] === null || row[columnMappings.ba2] === '');
+                    
+                    const hasDiscontinuity = extremite1Vide || extremite2Vide;
                     
                     const tr = document.createElement('tr');
                     if (hasDiscontinuity) {
@@ -265,16 +391,16 @@ FI000047496423;47496423;0;;BPE-02/30003-FT / BPE-154/30276-FT / AIGUES MORTES;CH
                     
                     tr.innerHTML = `
                         <td><span class="status-indicator ${hasDiscontinuity ? 'status-discontinu' : 'status-ok'}"></span></td>
-                        <td>${row.cb_code || ''}</td>
-                        <td>${row.cb_etiquet || ''}</td>
-                        <td>${row.cb_nd1 || ''}</td>
-                        <td>${row.cb_nd2 || ''}</td>
-                        <td class="${(!row.cb_bp1 || row.cb_bp1 === '') ? 'table-danger' : ''}">${row.cb_bp1 || ''}</td>
-                        <td class="${(!row.cb_ba1 || row.cb_ba1 === '') ? 'table-danger' : ''}">${row.cb_ba1 || ''}</td>
-                        <td class="${(!row.cb_bp2 || row.cb_bp2 === '') ? 'table-danger' : ''}">${row.cb_bp2 || ''}</td>
-                        <td class="${(!row.cb_ba2 || row.cb_ba2 === '') ? 'table-danger' : ''}">${row.cb_ba2 || ''}</td>
-                        <td>${row.cb_typelog || ''}</td>
-                        <td>${row.cb_lgreel || ''}</td>
+                        <td>${row[columnMappings.code] || ''}</td>
+                        <td>${row[columnMappings.etiquet] || ''}</td>
+                        <td>${row[columnMappings.nd1] || ''}</td>
+                        <td>${row[columnMappings.nd2] || ''}</td>
+                        <td class="${(row[columnMappings.bp1] === undefined || row[columnMappings.bp1] === null || row[columnMappings.bp1] === '') ? 'table-danger' : ''}">${row[columnMappings.bp1] || ''}</td>
+                        <td class="${(row[columnMappings.ba1] === undefined || row[columnMappings.ba1] === null || row[columnMappings.ba1] === '') ? 'table-danger' : ''}">${row[columnMappings.ba1] || ''}</td>
+                        <td class="${(row[columnMappings.bp2] === undefined || row[columnMappings.bp2] === null || row[columnMappings.bp2] === '') ? 'table-danger' : ''}">${row[columnMappings.bp2] || ''}</td>
+                        <td class="${(row[columnMappings.ba2] === undefined || row[columnMappings.ba2] === null || row[columnMappings.ba2] === '') ? 'table-danger' : ''}">${row[columnMappings.ba2] || ''}</td>
+                        <td>${row[columnMappings.typelog] || ''}</td>
+                        <td>${row[columnMappings.lgreel] || ''}</td>
                     `;
                     
                     resultBody.appendChild(tr);
@@ -331,6 +457,10 @@ FI000047496423;47496423;0;;BPE-02/30003-FT / BPE-154/30276-FT / AIGUES MORTES;CH
                     ? 'Afficher tous les câbles' 
                     : 'Afficher uniquement les discontinuités';
                 renderTable(showOnlyDiscontinuites ? discontinuitesData : allData);
+            });
+            
+            debugBtn.addEventListener('click', function() {
+                debugSection.style.display = debugSection.style.display === 'none' ? 'block' : 'none';
             });
 
             // Chargez le fichier automatiquement s'il y en a un
