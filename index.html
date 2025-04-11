@@ -23,12 +23,6 @@
             transition: all 0.3s;
             background-color: white;
         }
-        .file-upload-wrapper:hover {
-            border-color: #0d6efd;
-        }
-        .file-upload-wrapper.is-active {
-            border-color: #28a745;
-        }
         .table-container {
             margin-top: 30px;
             background-color: white;
@@ -52,10 +46,6 @@
             border-radius: 8px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
-        .filter-title {
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
         .info-section {
             margin-bottom: 20px;
             padding: 15px;
@@ -63,11 +53,15 @@
             border-radius: 8px;
             border-left: 4px solid #0dcaf0;
         }
+        .debug-section {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #fff3cd;
+            border-radius: 8px;
+            border-left: 4px solid #ffc107;
+        }
         .hidden {
             display: none;
-        }
-        #exportBtn {
-            margin-left: 10px;
         }
         #statusText {
             margin-top: 15px;
@@ -143,6 +137,11 @@
                 </table>
             </div>
         </div>
+
+        <div id="debugSection" class="debug-section hidden">
+            <h5>Informations de débogage</h5>
+            <div id="debugInfo"></div>
+        </div>
     </div>
 
     <script>
@@ -157,6 +156,8 @@
             const typeFilter = document.getElementById('typeFilter');
             const exportBtn = document.getElementById('exportBtn');
             const statusText = document.getElementById('statusText');
+            const debugSection = document.getElementById('debugSection');
+            const debugInfo = document.getElementById('debugInfo');
 
             let allResults = [];
             let filteredResults = [];
@@ -172,30 +173,13 @@
                 e.stopPropagation();
             }
 
-            ['dragenter', 'dragover'].forEach(eventName => {
-                dropArea.addEventListener(eventName, highlight, false);
-            });
-
-            ['dragleave', 'drop'].forEach(eventName => {
-                dropArea.addEventListener(eventName, unhighlight, false);
-            });
-
-            function highlight() {
-                dropArea.classList.add('is-active');
-            }
-
-            function unhighlight() {
-                dropArea.classList.remove('is-active');
-            }
-
             // Gestion du drop
-            dropArea.addEventListener('drop', handleDrop, false);
-
-            function handleDrop(e) {
+            dropArea.addEventListener('drop', function(e) {
+                preventDefaults(e);
                 const dt = e.dataTransfer;
                 const files = dt.files;
                 handleFiles(files);
-            }
+            });
 
             // Gestion du clic sur le bouton Parcourir
             browseBtn.addEventListener('click', function() {
@@ -223,34 +207,20 @@
                 isProcessing = true;
                 statusText.textContent = "Lecture du fichier...";
                 browseBtn.disabled = true;
-
+                
                 // Réinitialiser les résultats précédents
                 allResults = [];
                 filteredResults = [];
                 resultSection.classList.add('hidden');
+                debugSection.classList.add('hidden');
                 
-                // Méthode manuelle de lecture et traitement du fichier
+                // Méthode manuelle de lecture du fichier
                 const reader = new FileReader();
                 
-                reader.onloadstart = function() {
-                    statusText.textContent = "Début de la lecture du fichier...";
-                };
-                
-                reader.onprogress = function(e) {
-                    if (e.lengthComputable) {
-                        const percentLoaded = Math.round((e.loaded / e.total) * 100);
-                        statusText.textContent = `Lecture du fichier: ${percentLoaded}%`;
-                    }
-                };
-                
                 reader.onload = function(e) {
-                    statusText.textContent = "Fichier chargé, début de l'analyse...";
+                    statusText.textContent = "Fichier chargé, analyse en cours...";
                     const csvContent = e.target.result;
-                    
-                    // Traitement simple ligne par ligne
-                    setTimeout(() => {
-                        processCSVContent(csvContent);
-                    }, 100);
+                    processCSVContent(csvContent, file.name);
                 };
                 
                 reader.onerror = function() {
@@ -262,16 +232,29 @@
                 reader.readAsText(file);
             }
             
-            function processCSVContent(content) {
+            function processCSVContent(content, fileName) {
                 try {
+                    // Informations de débogage
+                    let debugText = `<p>Fichier: ${fileName}</p>`;
+                    
+                    // Détecter l'encodage (UTF-8 BOM)
+                    let startIndex = 0;
+                    if (content.charCodeAt(0) === 0xFEFF) {
+                        startIndex = 1; // Sauter le BOM
+                        debugText += '<p>BOM UTF-8 détecté et ignoré.</p>';
+                    }
+                    
                     // Convertir le contenu en tableau de lignes
-                    const lines = content.split(/\r\n|\n/);
+                    const lines = content.substr(startIndex).split(/\r\n|\n|\r/);
+                    debugText += `<p>Nombre total de lignes: ${lines.length}</p>`;
+                    
                     if (lines.length < 2) {
                         throw new Error("Le fichier CSV ne contient pas assez de lignes.");
                     }
                     
                     // Extraction des en-têtes (première ligne)
                     const headers = lines[0].split(';');
+                    debugText += `<p>En-têtes détectés (${headers.length}): ${headers.join(', ')}</p>`;
                     
                     // Trouver les indices des colonnes importantes
                     const columnIndices = {
@@ -285,10 +268,43 @@
                         cb_ba2: headers.indexOf('cb_ba2')
                     };
                     
-                    // Vérifier que les colonnes essentielles sont présentes
+                    debugText += '<p>Indices des colonnes importantes:</p><ul>';
+                    for (const col in columnIndices) {
+                        debugText += `<li>${col}: ${columnIndices[col]}</li>`;
+                    }
+                    debugText += '</ul>';
+                    
+                    // Si les colonnes essentielles sont manquantes, essayer de les trouver par correspondance partielle
                     if (columnIndices.cb_bp1 === -1 || columnIndices.cb_ba1 === -1 || 
                         columnIndices.cb_bp2 === -1 || columnIndices.cb_ba2 === -1) {
-                        throw new Error("Colonnes essentielles manquantes dans le CSV.");
+                        
+                        debugText += '<p>Certaines colonnes essentielles non trouvées. Tentative de recherche par correspondance partielle...</p>';
+                        
+                        // Recherche par correspondance partielle
+                        for (let i = 0; i < headers.length; i++) {
+                            const header = headers[i].toLowerCase();
+                            if (columnIndices.cb_bp1 === -1 && header.includes('bp1')) {
+                                columnIndices.cb_bp1 = i;
+                            } else if (columnIndices.cb_ba1 === -1 && header.includes('ba1')) {
+                                columnIndices.cb_ba1 = i;
+                            } else if (columnIndices.cb_bp2 === -1 && header.includes('bp2')) {
+                                columnIndices.cb_bp2 = i;
+                            } else if (columnIndices.cb_ba2 === -1 && header.includes('ba2')) {
+                                columnIndices.cb_ba2 = i;
+                            }
+                        }
+                        
+                        debugText += '<p>Après correspondance partielle:</p><ul>';
+                        for (const col in columnIndices) {
+                            debugText += `<li>${col}: ${columnIndices[col]}</li>`;
+                        }
+                        debugText += '</ul>';
+                    }
+                    
+                    // Vérifier à nouveau les colonnes essentielles
+                    if (columnIndices.cb_bp1 === -1 || columnIndices.cb_ba1 === -1 || 
+                        columnIndices.cb_bp2 === -1 || columnIndices.cb_ba2 === -1) {
+                        throw new Error("Impossible de trouver toutes les colonnes essentielles dans le CSV.");
                     }
                     
                     // Indices de secours pour les colonnes optionnelles
@@ -297,91 +313,130 @@
                     if (columnIndices.cb_nd1 === -1) columnIndices.cb_nd1 = 2;
                     if (columnIndices.cb_nd2 === -1) columnIndices.cb_nd2 = 3;
                     
-                    // Traitement des lignes par petits lots
-                    statusText.textContent = "Analyse des lignes en cours...";
-                    
-                    const processInBatches = function(startIndex, batchSize) {
-                        let count = 0;
-                        let endIndex = Math.min(startIndex + batchSize, lines.length);
+                    // Examiner quelques exemples de lignes
+                    debugText += '<p>Exemples de lignes:</p>';
+                    const exampleCount = Math.min(5, lines.length - 1);
+                    for (let i = 1; i <= exampleCount; i++) {
+                        const fields = lines[i].split(';');
+                        debugText += `<p><strong>Ligne ${i}:</strong> `;
                         
-                        for (let i = startIndex; i < endIndex; i++) {
-                            if (lines[i].trim() === '') continue;
+                        if (fields.length >= Math.max(
+                            columnIndices.cb_bp1, columnIndices.cb_ba1, 
+                            columnIndices.cb_bp2, columnIndices.cb_ba2) + 1) {
                             
-                            const fields = lines[i].split(';');
+                            debugText += `cb_bp1="${fields[columnIndices.cb_bp1]}", `;
+                            debugText += `cb_ba1="${fields[columnIndices.cb_ba1]}", `;
+                            debugText += `cb_bp2="${fields[columnIndices.cb_bp2]}", `;
+                            debugText += `cb_ba2="${fields[columnIndices.cb_ba2]}"`;
+                        } else {
+                            debugText += `(champs insuffisants: ${fields.length} trouvés)`;
+                        }
+                        debugText += '</p>';
+                    }
+                    
+                    // Traitement des lignes une par une
+                    statusText.textContent = "Analyse des lignes...";
+                    let discontinuityCount = 0;
+                    let processedLines = 0;
+                    
+                    // Parcourir toutes les lignes (sauf l'en-tête)
+                    for (let i = 1; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (line === '') continue;
+                        
+                        processedLines++;
+                        
+                        const fields = line.split(';');
+                        
+                        // S'assurer que la ligne a suffisamment de champs
+                        if (fields.length < Math.max(
+                            columnIndices.cb_bp1, columnIndices.cb_ba1, 
+                            columnIndices.cb_bp2, columnIndices.cb_ba2) + 1) {
+                            continue;
+                        }
+                        
+                        // Récupérer les valeurs importantes
+                        const bp1 = fields[columnIndices.cb_bp1] || '';
+                        const ba1 = fields[columnIndices.cb_ba1] || '';
+                        const bp2 = fields[columnIndices.cb_bp2] || '';
+                        const ba2 = fields[columnIndices.cb_ba2] || '';
+                        
+                        // Vérifier si les extrémités sont connectées
+                        // Une extrémité est connectée si au moins un des deux (BP ou BA) n'est pas vide
+                        const isExtremity1Connected = bp1.trim() !== '' || ba1.trim() !== '';
+                        const isExtremity2Connected = bp2.trim() !== '' || ba2.trim() !== '';
+                        
+                        // Détecter les discontinuités
+                        if (!isExtremity1Connected || !isExtremity2Connected) {
+                            let discontinuityType = '';
                             
-                            // Vérifier si les extrémités sont connectées
-                            const hasBP1 = columnIndices.cb_bp1 < fields.length && fields[columnIndices.cb_bp1].trim() !== '';
-                            const hasBA1 = columnIndices.cb_ba1 < fields.length && fields[columnIndices.cb_ba1].trim() !== '';
-                            const hasBP2 = columnIndices.cb_bp2 < fields.length && fields[columnIndices.cb_bp2].trim() !== '';
-                            const hasBA2 = columnIndices.cb_ba2 < fields.length && fields[columnIndices.cb_ba2].trim() !== '';
-                            
-                            const isExtremity1Connected = hasBP1 || hasBA1;
-                            const isExtremity2Connected = hasBP2 || hasBA2;
-                            
-                            // Si une discontinuité est détectée
-                            if (!isExtremity1Connected || !isExtremity2Connected) {
-                                let discontinuityType = '';
-                                
-                                if (!isExtremity1Connected && !isExtremity2Connected) {
-                                    discontinuityType = 'Double discontinuité';
-                                } else if (!isExtremity1Connected) {
-                                    discontinuityType = 'Discontinuité extrémité 1';
-                                } else if (!isExtremity2Connected) {
-                                    discontinuityType = 'Discontinuité extrémité 2';
-                                }
-                                
-                                // Ajouter aux résultats
-                                allResults.push({
-                                    cb_code: columnIndices.cb_code < fields.length ? fields[columnIndices.cb_code] : '',
-                                    cb_etiquet: columnIndices.cb_etiquet < fields.length ? fields[columnIndices.cb_etiquet] : '',
-                                    cb_nd1: columnIndices.cb_nd1 < fields.length ? fields[columnIndices.cb_nd1] : '',
-                                    cb_nd2: columnIndices.cb_nd2 < fields.length ? fields[columnIndices.cb_nd2] : '',
-                                    cb_bp1: columnIndices.cb_bp1 < fields.length ? fields[columnIndices.cb_bp1] : '',
-                                    cb_ba1: columnIndices.cb_ba1 < fields.length ? fields[columnIndices.cb_ba1] : '',
-                                    cb_bp2: columnIndices.cb_bp2 < fields.length ? fields[columnIndices.cb_bp2] : '',
-                                    cb_ba2: columnIndices.cb_ba2 < fields.length ? fields[columnIndices.cb_ba2] : '',
-                                    Type_Discontinuite: discontinuityType,
-                                    isExtremity1Connected: isExtremity1Connected,
-                                    isExtremity2Connected: isExtremity2Connected
-                                });
+                            if (!isExtremity1Connected && !isExtremity2Connected) {
+                                discontinuityType = 'Double discontinuité';
+                            } else if (!isExtremity1Connected) {
+                                discontinuityType = 'Discontinuité extrémité 1';
+                            } else if (!isExtremity2Connected) {
+                                discontinuityType = 'Discontinuité extrémité 2';
                             }
                             
-                            count++;
+                            // Ajouter aux résultats
+                            allResults.push({
+                                cb_code: columnIndices.cb_code < fields.length ? fields[columnIndices.cb_code] : '',
+                                cb_etiquet: columnIndices.cb_etiquet < fields.length ? fields[columnIndices.cb_etiquet] : '',
+                                cb_nd1: columnIndices.cb_nd1 < fields.length ? fields[columnIndices.cb_nd1] : '',
+                                cb_nd2: columnIndices.cb_nd2 < fields.length ? fields[columnIndices.cb_nd2] : '',
+                                cb_bp1: bp1,
+                                cb_ba1: ba1,
+                                cb_bp2: bp2,
+                                cb_ba2: ba2,
+                                Type_Discontinuite: discontinuityType,
+                                isExtremity1Connected: isExtremity1Connected,
+                                isExtremity2Connected: isExtremity2Connected
+                            });
+                            
+                            discontinuityCount++;
                         }
                         
-                        // Mettre à jour le statut
-                        statusText.textContent = `Analyse en cours... ${endIndex-1} lignes sur ${lines.length-1} traitées`;
-                        
-                        // S'il reste des lignes à traiter, programmer le prochain lot
-                        if (endIndex < lines.length) {
-                            setTimeout(function() {
-                                processInBatches(endIndex, batchSize);
-                            }, 0);
-                        } else {
-                            // Analyse terminée
-                            finishProcessing();
+                        // Mettre à jour le statut toutes les 1000 lignes
+                        if (i % 1000 === 0 || i === lines.length - 1) {
+                            statusText.textContent = `Analyse: ${i}/${lines.length-1} lignes traitées, ${discontinuityCount} discontinuités trouvées.`;
                         }
-                    };
+                    }
                     
-                    // Commencer le traitement par lots, en sautant la ligne d'en-tête
-                    processInBatches(1, 1000);
+                    // Ajouter le résumé final des discontinuités
+                    debugText += `<p>Résultat final: ${discontinuityCount} discontinuités trouvées sur ${processedLines} lignes traitées.</p>`;
+                    
+                    // Si aucune discontinuité trouvée, ajouter des informations supplémentaires
+                    if (discontinuityCount === 0) {
+                        debugText += '<p><strong>Attention:</strong> Aucune discontinuité trouvée. Vérifiez que:</p><ul>';
+                        debugText += '<li>Les colonnes cb_bp1, cb_ba1, cb_bp2, cb_ba2 sont correctement identifiées</li>';
+                        debugText += '<li>Il y a effectivement des lignes où les deux champs (cb_bp ET cb_ba) sont vides à une extrémité</li>';
+                        debugText += '</ul>';
+                    }
+                    
+                    // Afficher les infos de débogage
+                    debugInfo.innerHTML = debugText;
+                    debugSection.classList.remove('hidden');
+                    
+                    // Finaliser l'affichage des résultats
+                    filteredResults = [...allResults];
+                    displayResults();
+                    resultSection.classList.remove('hidden');
+                    
+                    statusText.textContent = `Analyse terminée: ${discontinuityCount} discontinuités trouvées sur ${processedLines} lignes traitées.`;
+                    isProcessing = false;
+                    browseBtn.disabled = false;
+                    
                 } catch (error) {
                     statusText.textContent = "Erreur lors de l'analyse: " + error.message;
                     console.error("Erreur d'analyse:", error);
+                    
+                    // Ajouter des infos d'erreur au débogage
+                    debugInfo.innerHTML += `<p style="color: red;"><strong>Erreur:</strong> ${error.message}</p>`;
+                    debugSection.classList.remove('hidden');
+                    
                     isProcessing = false;
                     browseBtn.disabled = false;
                 }
-            }
-            
-            function finishProcessing() {
-                // Traitement terminé
-                filteredResults = [...allResults];
-                displayResults();
-                resultSection.classList.remove('hidden');
-                
-                statusText.textContent = `Analyse terminée: ${allResults.length} discontinuités trouvées.`;
-                isProcessing = false;
-                browseBtn.disabled = false;
             }
 
             function displayResults() {
